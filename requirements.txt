@@ -1,0 +1,4 @@
+streamlit
+pandas
+plotly
+sqlite3  # (عادةً مدمج مع Python، لكن يمكن إضافته إذا لزم الأمر)
