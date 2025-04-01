@@ -1,7 +1,5 @@
 import sqlite3
 from datetime import datetime
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
 
 class FinanceManager:
     def __init__(self, db_file="finance.db"):
@@ -11,29 +9,27 @@ class FinanceManager:
 
     def create_tables(self):
         with self.conn:
-            # جدول الحسابات مع إضافة العملة
+            # جدول الحسابات
             self.conn.execute('''
                 CREATE TABLE IF NOT EXISTS accounts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
                     balance REAL DEFAULT 0.0,
                     min_balance REAL DEFAULT 0.0,
-                    currency TEXT DEFAULT "EGP",  -- إضافة العملة
                     created_at TEXT
                 )
             ''')
-            # جدول المعاملات مع تخزين العملة
+            # جدول المعاملات مع عمود الفئة
             self.conn.execute('''
                 CREATE TABLE IF NOT EXISTS transactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     date TEXT NOT NULL,
                     type TEXT NOT NULL,
                     amount REAL NOT NULL,
-                    currency TEXT NOT NULL,  -- إضافة العملة لكل معاملة
                     account_id INTEGER,
                     description TEXT,
                     payment_method TEXT,
-                    category TEXT,
+                    category TEXT,  -- يمكن أن يحتوي على فئات متعددة مفصولة بفواصل
                     FOREIGN KEY (account_id) REFERENCES accounts (id)
                 )
             ''')
@@ -42,26 +38,43 @@ class FinanceManager:
                 CREATE TABLE IF NOT EXISTS custom_categories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     account_id INTEGER,
-                    transaction_type TEXT NOT NULL,
+                    transaction_type TEXT NOT NULL,  -- "IN" أو "OUT"
                     category_name TEXT NOT NULL,
                     FOREIGN KEY (account_id) REFERENCES accounts (id)
                 )
             ''')
 
-    def add_account(self, name, balance=0.0, min_balance=0.0, currency="EGP"):
-        """إضافة حساب جديد مع تحديد العملة"""
+    def add_account(self, account_name, opening_balance=0.0, min_balance=0.0):
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self.conn:
-            self.conn.execute('''
-                INSERT INTO accounts (name, balance, min_balance, currency, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (name, balance, min_balance, currency, created_at))
+            cursor = self.conn.execute('''
+                INSERT INTO accounts (name, balance, min_balance, created_at)
+                VALUES (?, ?, ?, ?)
+            ''', (account_name, opening_balance, min_balance, created_at))
+            return cursor.lastrowid
 
-    def add_transaction(self, account_id, amount, trans_type, currency="EGP", description="", payment_method="كاش", category=""):
-        """إضافة معاملة جديدة والتحقق من الرصيد"""
-        date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    def add_custom_category(self, account_id, transaction_type, category_name):
+        """إضافة فئة مخصصة"""
         with self.conn:
-            account = self.conn.execute('SELECT balance, min_balance, currency FROM accounts WHERE id = ?', (account_id,)).fetchone()
+            cursor = self.conn.execute('''
+                INSERT INTO custom_categories (account_id, transaction_type, category_name)
+                VALUES (?, ?, ?)
+            ''', (account_id, transaction_type, category_name))
+            return cursor.lastrowid
+
+    def get_custom_categories(self, account_id, transaction_type):
+        """استرجاع الفئات المخصصة"""
+        return self.conn.execute('''
+            SELECT category_name FROM custom_categories 
+            WHERE account_id = ? AND transaction_type = ?
+        ''', (account_id, transaction_type)).fetchall()
+
+    def add_transaction(self, account_id, amount, trans_type, description="", payment_method="كاش", category=""):
+        date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # تحويل قائمة الفئات إلى سلسلة مفصولة بفواصل
+        category_str = ", ".join(category) if isinstance(category, list) else category
+        with self.conn:
+            account = self.conn.execute('SELECT balance, min_balance FROM accounts WHERE id = ?', (account_id,)).fetchone()
             if not account:
                 raise ValueError("الحساب غير موجود")
             if amount <= 0:
@@ -70,19 +83,55 @@ class FinanceManager:
                 raise ValueError("الرصيد غير كافٍ")
 
             self.conn.execute('''
-                INSERT INTO transactions (date, type, amount, currency, account_id, description, payment_method, category)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (date, trans_type, amount, currency, account_id, description, payment_method, category))
+                INSERT INTO transactions (date, type, amount, account_id, description, payment_method, category)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (date, trans_type, amount, account_id, description, payment_method, category_str))
 
             new_balance = account[0] + amount if trans_type == "IN" else account[0] - amount
             self.conn.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_balance, account_id))
 
-            # التحقق من التنبيه عند انخفاض الرصيد
             if new_balance < account[1]:
-                print(f"⚠️ تحذير: رصيد الحساب ({account_id}) أقل من الحد الأدنى ({account[1]} {account[2]})")
+                return "تنبيه: الرصيد أقل من الحد الأدنى"
+
+    def edit_transaction(self, trans_id, account_id, amount, trans_type, description, payment_method, category):
+        with self.conn:
+            old_trans = self.conn.execute('SELECT type, amount, account_id FROM transactions WHERE id = ?', (trans_id,)).fetchone()
+            if not old_trans:
+                raise ValueError("المعاملة غير موجودة")
+            old_type, old_amount, old_account_id = old_trans
+
+            account = self.conn.execute('SELECT balance, min_balance FROM accounts WHERE id = ?', (account_id,)).fetchone()
+            if not account:
+                raise ValueError("الحساب غير موجود")
+            current_balance, min_balance = account
+
+            if old_account_id == account_id:
+                temp_balance = current_balance - old_amount if old_type == "IN" else current_balance + old_amount
+            else:
+                self.conn.execute('UPDATE accounts SET balance = balance + ? WHERE id = ?', 
+                                  (old_amount if old_type == "IN" else -old_amount, old_account_id))
+                temp_balance = current_balance
+
+            if amount <= 0:
+                raise ValueError("المبلغ يجب أن يكون موجبًا")
+            if trans_type == "OUT" and temp_balance < amount:
+                raise ValueError("الرصيد غير كافٍ")
+
+            new_balance = temp_balance + amount if trans_type == "IN" else temp_balance - amount
+            self.conn.execute('UPDATE accounts SET balance = ? WHERE id = ?', (new_balance, account_id))
+
+            category_str = ", ".join(category) if isinstance(category, list) else category
+            date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.conn.execute('''
+                UPDATE transactions 
+                SET date = ?, type = ?, amount = ?, account_id = ?, description = ?, payment_method = ?, category = ? 
+                WHERE id = ?
+            ''', (date, trans_type, amount, account_id, description, payment_method, category_str, trans_id))
+
+            if new_balance < min_balance:
+                return "تنبيه: الرصيد أقل من الحد الأدنى"
 
     def filter_transactions(self, account_id=None, start_date=None, end_date=None, trans_type=None, category=None):
-        """تصفية المعاملات المالية"""
         query = 'SELECT * FROM transactions WHERE 1=1'
         params = []
         if account_id:
@@ -98,37 +147,20 @@ class FinanceManager:
             query += ' AND type = ?'
             params.append(trans_type)
         if category:
-            query += ' AND category = ?'
-            params.append(category)
+            query += ' AND category LIKE ?'
+            params.append(f"%{category}%")
         return self.conn.execute(query, params).fetchall()
 
-    def export_transactions_to_pdf(self, file_name="transactions_report.pdf", account_id=None, start_date=None, end_date=None):
-        """تصدير المعاملات إلى تقرير PDF"""
-        transactions = self.filter_transactions(account_id, start_date, end_date)
-        if not transactions:
-            print("⚠️ لا توجد معاملات للتصدير!")
-            return
-
-        c = canvas.Canvas(file_name, pagesize=letter)
-        c.drawString(100, 750, "📜 تقرير المعاملات المالية")
-        c.drawString(100, 730, f"التاريخ: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        c.drawString(100, 710, "-" * 50)
-
-        y = 690
-        c.drawString(100, y, "ID  |  التاريخ  |  النوع  |  المبلغ  |  العملة  |  الوصف")
-        y -= 20
-        c.drawString(100, y, "-" * 100)
-
-        for trans in transactions:
-            y -= 20
-            c.drawString(100, y, f"{trans[0]}  |  {trans[1]}  |  {trans[2]}  |  {trans[3]:.2f}  {trans[4]}  |  {trans[6]}")
-            if y < 100:  # إذا امتلأت الصفحة، أضف صفحة جديدة
-                c.showPage()
-                y = 750
-
-        c.save()
-        print(f"✅ تم حفظ التقرير: {file_name}")
-
     def get_all_accounts(self):
-        """جلب جميع الحسابات"""
         return self.conn.execute('SELECT * FROM accounts').fetchall()
+
+    def get_all_transactions(self):
+        return self.conn.execute('SELECT * FROM transactions').fetchall()
+
+    def check_alerts(self):
+        alerts = []
+        accounts = self.get_all_accounts()
+        for acc in accounts:
+            if acc[2] < acc[3]:
+                alerts.append(f"⚠️ الرصيد في حساب {acc[1]} أقل من الحد الأدنى!")
+        return alerts
