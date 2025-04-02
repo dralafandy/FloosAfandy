@@ -1,62 +1,40 @@
 import streamlit as st
 from finance_manager import FinanceManager
 
-# إعداد الصفحة
 st.title("🏦 إدارة الحسابات")
 
-# إنشاء كائن لإدارة البيانات
 fm = FinanceManager()
 
-# قسم إضافة حساب جديد
-st.header("➕ إضافة حساب جديد")
-col1, col2, col3 = st.columns(3)
-with col1:
-    account_name = st.text_input("اسم الحساب", placeholder="مثال: حساب توفير")
-with col2:
-    opening_balance = st.number_input("الرصيد الافتتاحي", min_value=0.0, step=100.0)
-with col3:
-    min_balance = st.number_input("الحد الأدنى للرصيد", min_value=0.0, step=100.0)
+# إضافة حساب جديد
+st.subheader("إضافة حساب جديد")
+account_name = st.text_input("اسم الحساب")
+opening_balance = st.number_input("الرصيد الافتتاحي", min_value=0.0, step=0.01)
+min_balance = st.number_input("الحد الأدنى للرصيد", min_value=0.0, step=0.01)
+if st.button("إضافة الحساب"):
+    fm.add_account(account_name, opening_balance, min_balance)
+    st.success("تم إضافة الحساب بنجاح!")
 
-if st.button("إضافة الحساب", key="add", type="primary"):
-    account_id = fm.add_account(account_name, opening_balance, min_balance)
-    st.success(f"✅ تم إضافة الحساب! معرف الحساب: {account_id}")
-
-# قسم قائمة الحسابات
-st.header("📋 قائمة الحسابات")
+# عرض الحسابات
+st.subheader("قائمة الحسابات")
 accounts = fm.get_all_accounts()
 if accounts:
-    account_data = [{"معرف": acc[0], "الاسم": acc[1], "الرصيد": acc[2], "الحد الأدنى": acc[3], "تاريخ الإنشاء": acc[4]} 
-                    for acc in accounts]
-    st.table(account_data)
+    account_df = pd.DataFrame(accounts, columns=["id", "name", "balance", "min_balance", "created_at"])
+    for idx, row in account_df.iterrows():
+        col1, col2, col3 = st.columns([3, 1, 1])
+        col1.write(f"{row['name']} - الرصيد: {row['balance']:,.2f} (الحد الأدنى: {row['min_balance']:,.2f})")
+        if col2.button("✏️ تعديل", key=f"edit_{row['id']}"):
+            st.session_state[f"edit_account_{row['id']}"] = True
+        if col3.button("🗑️ حذف", key=f"del_{row['id']}"):
+            fm.delete_account(row['id'])
+            st.success("تم حذف الحساب!")
 
-    # خيار تعديل أو حذف حساب
-    st.subheader("🛠️ تعديل أو حذف حساب")
-    account_options = {acc[0]: acc[1] for acc in accounts}
-    selected_account = st.selectbox("اختر حسابًا", options=list(account_options.keys()), 
-                                   format_func=lambda x: account_options[x])
-    
-    # تعديل الحساب
-    with st.expander("✏️ تعديل الحساب"):
-        new_name = st.text_input("اسم جديد", value=account_options[selected_account])
-        new_balance = st.number_input("رصيد جديد", value=float(accounts[selected_account-1][2]), step=100.0)
-        new_min_balance = st.number_input("حد أدنى جديد", value=float(accounts[selected_account-1][3]), step=100.0)
-        if st.button("حفظ التعديلات", key="edit"):
-            with fm.conn:
-                fm.conn.execute('''
-                    UPDATE accounts SET name = ?, balance = ?, min_balance = ? WHERE id = ?
-                ''', (new_name, new_balance, new_min_balance, selected_account))
-            st.success(f"✅ تم تعديل الحساب {account_options[selected_account]} بنجاح!")
-
-    # حذف الحساب
-    if st.button("🗑️ حذف الحساب", key="delete", type="secondary"):
-        with fm.conn:
-            fm.conn.execute('DELETE FROM accounts WHERE id = ?', (selected_account,))
-            fm.conn.execute('DELETE FROM transactions WHERE account_id = ?', (selected_account,))
-        st.success(f"🗑️ تم حذف الحساب {account_options[selected_account]} بنجاح!")
-
+        if st.session_state.get(f"edit_account_{row['id']}", False):
+            with st.form(key=f"form_{row['id']}"):
+                new_name = st.text_input("اسم الحساب", value=row['name'])
+                new_min_balance = st.number_input("الحد الأدنى للرصيد", value=row['min_balance'], min_value=0.0)
+                if st.form_submit_button("حفظ التعديلات"):
+                    fm.edit_account(row['id'], new_name, new_min_balance)
+                    st.success("تم تعديل الحساب!")
+                    st.session_state[f"edit_account_{row['id']}"] = False
 else:
-    st.info("ℹ️ لا توجد حسابات بعد، أضف حسابًا جديدًا أعلاه!")
-
-# نصائح سريعة
-st.markdown("### 💡 نصيحة")
-st.write("تأكد من تحديد حد أدنى للرصيد لتلقي تنبيهات عند انخفاض الرصيد.")
+    st.info("لا توجد حسابات بعد.")
