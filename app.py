@@ -44,11 +44,10 @@ with st.sidebar:
             st.session_state.selected_account = "جميع الحسابات"
             st.rerun()
 
-# Main content (باقي الكود كما هو)
-st.markdown("<h1 style='text-align: center; color: #1e2a44;'>مرحبًا بك في FloosAfandy</h1>", unsafe_allow_html=True)
+# Main content
+st.markdown("<h1 style='text-align: center; color: #1A2525;'>مرحبًا بك في FloosAfandy</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: #6b7280;'>إدارة مالياتك بسهولة وأناقة</p>", unsafe_allow_html=True)
 st.markdown("---")
-# ... (باقي الكود دون تغيير)
 
 if alerts:
     st.warning("📢 تنبيهات مهمة:")
