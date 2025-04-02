@@ -9,7 +9,6 @@ class FinanceManager:
 
     def create_tables(self):
         with self.conn:
-            # جدول الحسابات
             self.conn.execute('''
                 CREATE TABLE IF NOT EXISTS accounts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -19,7 +18,6 @@ class FinanceManager:
                     created_at TEXT
                 )
             ''')
-            # جدول المعاملات مع عمود الفئة
             self.conn.execute('''
                 CREATE TABLE IF NOT EXISTS transactions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,16 +27,15 @@ class FinanceManager:
                     account_id INTEGER,
                     description TEXT,
                     payment_method TEXT,
-                    category TEXT,  -- يمكن أن يحتوي على فئات متعددة مفصولة بفواصل
+                    category TEXT,
                     FOREIGN KEY (account_id) REFERENCES accounts (id)
                 )
             ''')
-            # جدول الفئات المخصصة
             self.conn.execute('''
                 CREATE TABLE IF NOT EXISTS custom_categories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     account_id INTEGER,
-                    transaction_type TEXT NOT NULL,  -- "IN" أو "OUT"
+                    transaction_type TEXT NOT NULL,
                     category_name TEXT NOT NULL,
                     FOREIGN KEY (account_id) REFERENCES accounts (id)
                 )
@@ -54,7 +51,6 @@ class FinanceManager:
             return cursor.lastrowid
 
     def add_custom_category(self, account_id, transaction_type, category_name):
-        """إضافة فئة مخصصة"""
         with self.conn:
             cursor = self.conn.execute('''
                 INSERT INTO custom_categories (account_id, transaction_type, category_name)
@@ -63,15 +59,20 @@ class FinanceManager:
             return cursor.lastrowid
 
     def get_custom_categories(self, account_id, transaction_type):
-        """استرجاع الفئات المخصصة"""
         return self.conn.execute('''
             SELECT category_name FROM custom_categories 
             WHERE account_id = ? AND transaction_type = ?
         ''', (account_id, transaction_type)).fetchall()
 
+    def delete_custom_category(self, category_id):
+        with self.conn:
+            self.conn.execute('DELETE FROM custom_categories WHERE id = ?', (category_id,))
+
+    def get_all_categories(self):
+        return self.conn.execute('SELECT id, account_id, transaction_type, category_name FROM custom_categories').fetchall()
+
     def add_transaction(self, account_id, amount, trans_type, description="", payment_method="كاش", category=""):
         date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # تحويل قائمة الفئات إلى سلسلة مفصولة بفواصل
         category_str = ", ".join(category) if isinstance(category, list) else category
         with self.conn:
             account = self.conn.execute('SELECT balance, min_balance FROM accounts WHERE id = ?', (account_id,)).fetchone()
@@ -131,7 +132,7 @@ class FinanceManager:
             if new_balance < min_balance:
                 return "تنبيه: الرصيد أقل من الحد الأدنى"
 
-    def filter_transactions(self, account_id=None, start_date=None, end_date=None, trans_type=None, category=None):
+    def filter_transactions(self, account_id=None, start_date=None, end_date=None, trans_type=None, category=None, payment_method=None):
         query = 'SELECT * FROM transactions WHERE 1=1'
         params = []
         if account_id:
@@ -149,6 +150,9 @@ class FinanceManager:
         if category:
             query += ' AND category LIKE ?'
             params.append(f"%{category}%")
+        if payment_method:
+            query += ' AND payment_method = ?'
+            params.append(payment_method)
         return self.conn.execute(query, params).fetchall()
 
     def get_all_accounts(self):
