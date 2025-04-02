@@ -17,8 +17,6 @@ account_id = st.sidebar.selectbox("🏦 اختر الحساب", options=["جمي
 trans_type = st.sidebar.selectbox("📋 نوع المعاملة", ["الكل", "وارد", "منصرف"])
 start_date = st.sidebar.date_input("📅 من تاريخ", value=datetime.now() - timedelta(days=30))
 end_date = st.sidebar.date_input("📅 إلى تاريخ", value=datetime.now())
-
-# فلتر الفئات
 if account_id != "جميع الحسابات" and trans_type != "الكل":
     trans_type_db = "IN" if trans_type == "وارد" else "OUT"
     categories = fm.get_custom_categories(account_id, trans_type_db)
@@ -46,8 +44,10 @@ if transactions:
     # جدول المعاملات
     st.subheader("📋 جدول المعاملات")
     st.dataframe(df[["date", "type", "amount", "account", "description", "payment_method", "category"]])
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 تحميل الجدول كـ CSV", csv, "transactions_report.csv", "text/csv")
 
-    # رسم بياني للمعاملات بمرور الوقت
+    # رسم بياني للمعاملات
     st.subheader("📈 الرسم البياني للمعاملات")
     fig = px.bar(df, x="date", y="amount", color="type", title="المعاملات بمرور الوقت")
     st.plotly_chart(fig)
